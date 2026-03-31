@@ -32,7 +32,8 @@ def load_base_data():
     df = kagglehub.load_dataset(
         KaggleDatasetAdapter.PANDAS,
         "clementh7/france-immigration-2018-2021",
-        "merged_clean.csv"
+        "merged_clean.csv",
+        pandas_kwargs={"delimiter": ";"}
     )
     df['CODGEO'] = df['CODGEO'].astype(str).str.zfill(5)
     return df
