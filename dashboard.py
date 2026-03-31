@@ -281,7 +281,6 @@ with tab2:
         selected_round = st.radio("Round", ["First Round", "Second Round"], horizontal=True)
         sel_scale_elec = st.selectbox('Geographic Scale ', ['Departements', 'Communes'])
 
-    # Map round selection to Kaggle dataset paths
     suffix = "t1" if selected_round == "First Round" else "t2"
     k_path = f"clementh7/election-presidentielle-{'premier' if suffix == 't1' else 'deuxime'}-tour-2022"
 
@@ -297,55 +296,63 @@ with tab2:
 
         st.success(f"Successfully loaded {len(elec_raw)} rows of election data.")
 
-        # Identify the commune name column
-        group_col = 'libelle_commune' if 'libelle_commune' in elec_raw.columns else 'nom_commune'
+        # Check whether commune-level code is available
+        has_commune_code = 'code_commune' in elec_raw.columns
+
+        # Always build dept_code from code_departement
+        elec_raw['dept_code'] = elec_raw['code_departement'].astype(str).str.zfill(2)
+
+        # Build full 5-digit INSEE code only if possible
+        if has_commune_code:
+            elec_raw['full_code'] = (
+                elec_raw['dept_code'] +
+                elec_raw['code_commune'].astype(str).str.zfill(3)
+            )
 
         # Pre-load département GeoJSON
         dept_gdf_elec = fetch_geojson(dep_url, 2)
 
-        if sel_scale_elec == 'Departements':
-            elec_raw['full_code'] = (
-                elec_raw['code_departement'].astype(str).str.zfill(2) +
-                elec_raw['code_commune'].astype(str).str.zfill(3)
+        # Warn and fall back to Departements if communes not available
+        if sel_scale_elec == 'Communes' and not has_commune_code:
+            st.warning(
+                "Commune-level data is not available for the Second Round — "
+                "showing Département level instead."
             )
-            elec_raw['dept_code'] = elec_raw['code_departement'].astype(str).str.zfill(2)
-        
+
+        if sel_scale_elec == 'Departements' or not has_commune_code:
             agg = elec_raw.groupby(['dept_code', 'pol_group'])['voix'].sum().reset_index()
             total_votes = agg.groupby('dept_code')['voix'].transform('sum')
             agg['pct'] = (agg['voix'] / total_votes) * 100
-        
+
             elec_ex_r = agg[agg['pol_group'] == 1].copy()
             elec_ex_r['code'] = elec_ex_r['dept_code'].str.zfill(2)
-        
+
             final_elec_df = elec_ex_r.merge(dept_gdf_elec[['code', 'nom']], on='code', how='inner')
             map_bg_elec = dept_gdf_elec
-        
+
         else:
+            # Communes scale — only reachable for First Round
             dept_names_elec = sorted(dept_gdf_elec['nom'].unique())
             sel_dept_elec = st.sidebar.selectbox("Filter by Department ", dept_names_elec)
             target_code_elec = dept_gdf_elec[dept_gdf_elec['nom'] == sel_dept_elec]['code'].values[0]
-        
+
             com_gdf_elec = fetch_geojson(com_url, 5)
             map_bg_elec = com_gdf_elec[com_gdf_elec['code'].str.startswith(target_code_elec)].copy()
-        
-            elec_raw['full_code'] = (
-                elec_raw['code_departement'].astype(str).str.zfill(2) +
-                elec_raw['code_commune'].astype(str).str.zfill(3)
-            )
+
             commune_elec = elec_raw[elec_raw['full_code'].str.startswith(target_code_elec)].copy()
-        
+
             agg = commune_elec.groupby(['full_code', 'pol_group'])['voix'].sum().reset_index()
             total_votes = agg.groupby('full_code')['voix'].transform('sum')
             agg['pct'] = (agg['voix'] / total_votes) * 100
-        
+
             elec_ex_r = agg[agg['pol_group'] == 1].copy()
             elec_ex_r['code'] = elec_ex_r['full_code'].str.zfill(5)
-        
+
             final_elec_df = elec_ex_r.merge(map_bg_elec[['code', 'nom']], on='code', how='inner')
-        
+
         final_elec_df = final_elec_df.dropna(subset=['pct'])
 
-        # Map and table
+        # Map and stats
         col_map_elec, col_stats_elec = st.columns([3, 1])
 
         with col_map_elec:
@@ -358,8 +365,9 @@ with tab2:
 
         with col_stats_elec:
             st.markdown('#### Highest Rates')
+            display_df = final_elec_df[['nom', 'pct']].dropna().sort_values('pct', ascending=False)
             st.dataframe(
-                final_elec_df[['nom', 'pct']].sort_values('pct', ascending=False),
+                display_df,
                 hide_index=True,
                 column_config={
                     "nom": st.column_config.TextColumn(label="Area"),
@@ -367,7 +375,7 @@ with tab2:
                         label="Extreme Right %",
                         format="%.2f%%",
                         min_value=0,
-                        max_value=float(final_elec_df['pct'].max()),
+                        max_value=float(display_df['pct'].max()),
                     )
                 }
             )
