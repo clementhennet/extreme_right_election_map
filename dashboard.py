@@ -254,7 +254,6 @@ with tab1:
             df_selected_year_sorted,
             column_order=("nom", "pct"),
             hide_index=True,
-            width=None,
             column_config={
                 "nom": st.column_config.TextColumn(label="Area"),
                 "pct": st.column_config.ProgressColumn(
