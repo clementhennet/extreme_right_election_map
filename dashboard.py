@@ -237,7 +237,7 @@ with tab1:
     # Visuals
     col_map, col_stats = st.columns([3, 1])
     with col_map:
-        st.subheader(f"Percentage of Non-French residents in {sel_year}")
+        st.subheader(f"Percentage of Born Non-French residents in {sel_year}")
         if not final_df.empty:
             m1 = make_map(final_df, map_bg, 'pct', "Immigrant %")
             st.components.v1.html(m1._repr_html_(), height=600)
