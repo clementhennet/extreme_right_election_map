@@ -1,9 +1,10 @@
+# Set the API token to access the dataset I hosted on Kaggle
 import os
 import streamlit as st
 if "KAGGLE_API_TOKEN" in st.secrets:
     os.environ["KAGGLE_API_TOKEN"] = st.secrets["KAGGLE_API_TOKEN"]
 
-import streamlit as st
+# Import the required packages
 import geopandas as gpd
 import pandas as pd
 import json
@@ -17,16 +18,20 @@ from kagglehub import KaggleDatasetAdapter
 
 warnings.filterwarnings("ignore")
 
-################
+#################
 ##  Functions  ##
-################
+#################
 
+# Loading all necessary functions for the app to run
+
+# Function to systematize the data cleaning
 def clean_data(input_df, parameter, length=2):
     """Standardizes codes to ensure leading zeros (e.g., '1' -> '01')."""
     input_df = input_df.copy()
     input_df[parameter] = input_df[parameter].astype(str).str.strip().str.zfill(length)
     return input_df
 
+# Function to load the data set from Kaggle
 @st.cache_data
 def load_base_data():
     df = kagglehub.load_dataset(
@@ -38,6 +43,7 @@ def load_base_data():
     df['CODGEO'] = df['CODGEO'].astype(str).str.zfill(5)
     return df
 
+# Function to standardize and match the geographic code between data sources
 @st.cache_data
 def fetch_geojson(url, code_len):
     """
@@ -57,12 +63,13 @@ def fetch_geojson(url, code_len):
     gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.01, preserve_topology=True)
     return gdf
 
+# Function to render the maps
 def make_map(input_df, geo_gdf, column_name, legend_title):
-    # 1. Create a lookup dictionary for fast access: { 'code': percentage_value }
+    # Create a lookup dictionary for fast access: { 'code': percentage_value }
     # We use 'pct' as the key because that's what we calculated in the main logic
     data_lookup = input_df.set_index('code')[column_name].to_dict()
     
-    # 2. Inject the percentage into the GeoJSON properties
+    # Put the percentage into the GeoJSON properties
     # This ensures the tooltip can 'see' the number
     geo_json_data = json.loads(geo_gdf.to_json())
     for feature in geo_json_data['features']:
@@ -70,10 +77,10 @@ def make_map(input_df, geo_gdf, column_name, legend_title):
         # Assign the percentage if it exists, otherwise 'N/A'
         feature['properties']['display_pct'] = f"{round(data_lookup.get(geo_code, 0), 2)}%"
 
-    # 3. Initialize Map
+    # Set Map
     m = folium.Map(location=[46.2276, 2.2137], zoom_start=6, tiles='CartoDB positron')
     
-    # 4. Choropleth Layer
+    # Choropleth Layer
     folium.Choropleth(
         geo_data=geo_json_data, # Use the injected data here
         data=input_df,
@@ -86,7 +93,7 @@ def make_map(input_df, geo_gdf, column_name, legend_title):
         nan_fill_color='white'
     ).add_to(m)
 
-    # 5. Tooltip Layer 
+    # Tooltip Layer 
     folium.GeoJson(
         geo_json_data,
         style_function=lambda x: {'fillColor': 'transparent', 'color': 'transparent'},
@@ -104,7 +111,6 @@ def make_map(input_df, geo_gdf, column_name, legend_title):
     def style_fn(feature):
         return {'fillColor': '#ffffff00', 'color': '#ffffff00'}
 
-    # Add invisible GeoJson layer for tooltips to keep it snappy
     folium.GeoJson(
         geo_gdf,
         style_function=style_fn,
@@ -117,6 +123,7 @@ def make_map(input_df, geo_gdf, column_name, legend_title):
     
     return m
 
+# Function to assign political parties on the political spectrum
 @st.cache_data
 def assign_pol_group(nom):
     # Standardizing names to uppercase to ensure matching works
@@ -134,6 +141,7 @@ def assign_pol_group(nom):
     elif nom in ex_gauche: return 5
     else: return 6
 
+# Function to compute population difference (REMOVED FROM CURRENT VERSION)
 @st.cache_data
 def calculate_population_difference(input_df, selected_year, selected_scale, geojson_selected_scale):
     selected_year = int(selected_year)  # ensure int regardless of selectbox string input
@@ -182,7 +190,7 @@ com_url = "https://raw.githubusercontent.com/gregoiredavid/france-geojson/master
 
 tab1, tab2 = st.tabs(["Immigration Statistics", "Election Analysis"])
 
-# --- TAB 1: IMMIGRATION ---
+# --- TAB 1: IMMIGRATION DATA ---
 with tab1:
     with st.sidebar:
         st.header("Global Filters")
@@ -210,11 +218,11 @@ with tab1:
         immi_stats = agg[agg['IMMI'] == 1].copy()
         immi_stats['code'] = immi_stats['dept_code'].str.zfill(2)
         
-        # Merge with names for the legend/tooltip
+        # Merge with names for the legend
         final_df = immi_stats.merge(dept_gdf[['code', 'nom']], on='code', how='inner')
         map_bg = dept_gdf
     else:
-        # Commune scale: Must filter by Dept to avoid memory errors
+        # Commune scale: filter by Dept to avoid memory errors (loading all commune data would MAKE THE APP CRASH)
         dept_names = sorted(dept_gdf['nom'].unique())
         sel_dept = st.sidebar.selectbox("Filter by Department", dept_names)
         target_code = dept_gdf[dept_gdf['nom'] == sel_dept]['code'].values[0]
@@ -299,10 +307,10 @@ with tab2:
         # Check whether commune-level code is available
         has_commune_code = 'code_commune' in elec_raw.columns
 
-        # Always build dept_code from code_departement
+        # Build dept_code from code_departement to ensure compatibility
         elec_raw['dept_code'] = elec_raw['code_departement'].astype(str).str.zfill(2)
 
-        # Build full 5-digit INSEE code only if possible
+        # Create the full 5-digit INSEE code (only if possible)
         if has_commune_code:
             elec_raw['full_code'] = (
                 elec_raw['dept_code'] +
@@ -312,7 +320,7 @@ with tab2:
         # Pre-load département GeoJSON
         dept_gdf_elec = fetch_geojson(dep_url, 2)
 
-        # Warn and fall back to Departements if communes not available
+        # Warning and going back to Departements if communes not available
         if sel_scale_elec == 'Communes' and not has_commune_code:
             st.warning(
                 "Commune-level data is not available for the Second Round — "
@@ -331,7 +339,7 @@ with tab2:
             map_bg_elec = dept_gdf_elec
 
         else:
-            # Communes scale — only reachable for First Round
+            # Communes scale (only reachable for First Round)
             dept_names_elec = sorted(dept_gdf_elec['nom'].unique())
             sel_dept_elec = st.sidebar.selectbox("Filter by Department ", dept_names_elec)
             target_code_elec = dept_gdf_elec[dept_gdf_elec['nom'] == sel_dept_elec]['code'].values[0]
