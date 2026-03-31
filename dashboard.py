@@ -1,7 +1,6 @@
 import os
 os.environ["KAGGLE_USERNAME"] = st.secrets["KAGGLE_USERNAME"]
 os.environ["KAGGLE_KEY"] = st.secrets["KAGGLE_KEY"]
-```
 
 import streamlit as st
 import geopandas as gpd
