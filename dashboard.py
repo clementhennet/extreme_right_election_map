@@ -86,7 +86,7 @@ def make_map(input_df, geo_gdf, column_name, legend_title):
         nan_fill_color='white'
     ).add_to(m)
 
-    # 5. Tooltip Layer (The "Hover" fix)
+    # 5. Tooltip Layer 
     folium.GeoJson(
         geo_json_data,
         style_function=lambda x: {'fillColor': 'transparent', 'color': 'transparent'},
@@ -275,37 +275,96 @@ with tab1:
 # --- TAB 2: ELECTIONS ---
 with tab2:
     st.header('2022 Presidential Election Results')
-    selected_round = st.radio("Round", ["First Round", "Second Round"], horizontal=True)
-    
-    # Map Round selection to Kaggle dataset paths
+
+    with st.sidebar:
+        st.header("Election Filters")
+        selected_round = st.radio("Round", ["First Round", "Second Round"], horizontal=True)
+        sel_scale_elec = st.selectbox('Geographic Scale ', ['Departements', 'Communes'])
+
+    # Map round selection to Kaggle dataset paths
     suffix = "t1" if selected_round == "First Round" else "t2"
-    k_path = f"clementh7/election-presidentielle-{'premier' if suffix=='t1' else 'deuxime'}-tour-2022"
-    
+    k_path = f"clementh7/election-presidentielle-{'premier' if suffix == 't1' else 'deuxime'}-tour-2022"
+
     try:
-        # Load the specific CSV from KaggleHub
         elec_raw = kagglehub.load_dataset(
-            KaggleDatasetAdapter.PANDAS, 
-            k_path, 
+            KaggleDatasetAdapter.PANDAS,
+            k_path,
             f'presidentielle-2022-communes-{suffix}.csv'
         )
-        
-        # Apply the mapping function
+
         if 'nom' in elec_raw.columns:
             elec_raw['pol_group'] = elec_raw['nom'].apply(assign_pol_group)
-        
-        # Aggregation: Grouping by commune to find total votes vs extreme right votes
-        # Using 'libelle_commune' or 'code_insee' depending on the dataset schema
-        group_col = 'libelle_commune' if 'libelle_commune' in elec_raw.columns else 'nom_commune'
-        
-        elec_grouped = elec_raw.groupby([group_col, 'pol_group'])['voix'].sum().reset_index()
-        elec_total = elec_grouped.groupby(group_col)['voix'].transform('sum')
-        
-        # Calculate percentage for Extreme Right (Group 1)
-        elec_ex_r = elec_grouped[elec_grouped['pol_group'] == 1].copy()
-        elec_ex_r['percentage_votes'] = (elec_ex_r['voix'] / elec_total) * 100
-        
+
         st.success(f"Successfully loaded {len(elec_raw)} rows of election data.")
-        st.dataframe(elec_ex_r.head())
+
+        # Identify the commune name column
+        group_col = 'libelle_commune' if 'libelle_commune' in elec_raw.columns else 'nom_commune'
+
+        # Pre-load département GeoJSON
+        dept_gdf_elec = fetch_geojson(dep_url, 2)
+
+        if sel_scale_elec == 'Departements':
+            # Aggregate to département level
+            elec_raw['dept_code'] = elec_raw['code_commune'].astype(str).str.zfill(5).str[:2]
+
+            agg = elec_raw.groupby(['dept_code', 'pol_group'])['voix'].sum().reset_index()
+            total_votes = agg.groupby('dept_code')['voix'].transform('sum')
+            agg['pct'] = (agg['voix'] / total_votes) * 100
+
+            elec_ex_r = agg[agg['pol_group'] == 1].copy()
+            elec_ex_r['code'] = elec_ex_r['dept_code'].str.zfill(2)
+
+            final_elec_df = elec_ex_r.merge(dept_gdf_elec[['code', 'nom']], on='code', how='inner')
+            map_bg_elec = dept_gdf_elec
+
+        else:
+            # Commune scale: filter by département
+            dept_names_elec = sorted(dept_gdf_elec['nom'].unique())
+            sel_dept_elec = st.sidebar.selectbox("Filter by Department ", dept_names_elec)
+            target_code_elec = dept_gdf_elec[dept_gdf_elec['nom'] == sel_dept_elec]['code'].values[0]
+
+            com_gdf_elec = fetch_geojson(com_url, 5)
+            map_bg_elec = com_gdf_elec[com_gdf_elec['code'].str.startswith(target_code_elec)].copy()
+
+            # Filter election data to selected département
+            elec_raw['code_commune_clean'] = elec_raw['code_commune'].astype(str).str.zfill(5)
+            commune_elec = elec_raw[elec_raw['code_commune_clean'].str.startswith(target_code_elec)].copy()
+
+            agg = commune_elec.groupby(['code_commune_clean', 'pol_group'])['voix'].sum().reset_index()
+            total_votes = agg.groupby('code_commune_clean')['voix'].transform('sum')
+            agg['pct'] = (agg['voix'] / total_votes) * 100
+
+            elec_ex_r = agg[agg['pol_group'] == 1].copy()
+            elec_ex_r['code'] = elec_ex_r['code_commune_clean'].str.zfill(5)
+
+            final_elec_df = elec_ex_r.merge(map_bg_elec[['code', 'nom']], on='code', how='inner')
+
+        # Map and table
+        col_map_elec, col_stats_elec = st.columns([3, 1])
+
+        with col_map_elec:
+            st.subheader(f"Extreme Right Vote Share — {selected_round}")
+            if not final_elec_df.empty:
+                m2 = make_map(final_elec_df, map_bg_elec, 'pct', "Extreme Right %")
+                st.components.v1.html(m2._repr_html_(), height=600)
+            else:
+                st.error("No data found for this selection.")
+
+        with col_stats_elec:
+            st.markdown('#### Highest Rates')
+            st.dataframe(
+                final_elec_df[['nom', 'pct']].sort_values('pct', ascending=False),
+                hide_index=True,
+                column_config={
+                    "nom": st.column_config.TextColumn(label="Area"),
+                    "pct": st.column_config.ProgressColumn(
+                        label="Extreme Right %",
+                        format="%.2f%%",
+                        min_value=0,
+                        max_value=float(final_elec_df['pct'].max()),
+                    )
+                }
+            )
 
     except Exception as e:
         st.error(f"Election data could not be loaded: {e}")
