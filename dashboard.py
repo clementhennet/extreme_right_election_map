@@ -304,40 +304,46 @@ with tab2:
         dept_gdf_elec = fetch_geojson(dep_url, 2)
 
         if sel_scale_elec == 'Departements':
-            # Aggregate to département level
-            elec_raw['dept_code'] = elec_raw['code_commune'].astype(str).str.zfill(5).str[:2]
-
+            elec_raw['full_code'] = (
+                elec_raw['code_departement'].astype(str).str.zfill(2) +
+                elec_raw['code_commune'].astype(str).str.zfill(3)
+            )
+            elec_raw['dept_code'] = elec_raw['code_departement'].astype(str).str.zfill(2)
+        
             agg = elec_raw.groupby(['dept_code', 'pol_group'])['voix'].sum().reset_index()
             total_votes = agg.groupby('dept_code')['voix'].transform('sum')
             agg['pct'] = (agg['voix'] / total_votes) * 100
-
+        
             elec_ex_r = agg[agg['pol_group'] == 1].copy()
             elec_ex_r['code'] = elec_ex_r['dept_code'].str.zfill(2)
-
+        
             final_elec_df = elec_ex_r.merge(dept_gdf_elec[['code', 'nom']], on='code', how='inner')
             map_bg_elec = dept_gdf_elec
-
+        
         else:
-            # Commune scale: filter by département
             dept_names_elec = sorted(dept_gdf_elec['nom'].unique())
             sel_dept_elec = st.sidebar.selectbox("Filter by Department ", dept_names_elec)
             target_code_elec = dept_gdf_elec[dept_gdf_elec['nom'] == sel_dept_elec]['code'].values[0]
-
+        
             com_gdf_elec = fetch_geojson(com_url, 5)
             map_bg_elec = com_gdf_elec[com_gdf_elec['code'].str.startswith(target_code_elec)].copy()
-
-            # Filter election data to selected département
-            elec_raw['code_commune_clean'] = elec_raw['code_commune'].astype(str).str.zfill(5)
-            commune_elec = elec_raw[elec_raw['code_commune_clean'].str.startswith(target_code_elec)].copy()
-
-            agg = commune_elec.groupby(['code_commune_clean', 'pol_group'])['voix'].sum().reset_index()
-            total_votes = agg.groupby('code_commune_clean')['voix'].transform('sum')
+        
+            elec_raw['full_code'] = (
+                elec_raw['code_departement'].astype(str).str.zfill(2) +
+                elec_raw['code_commune'].astype(str).str.zfill(3)
+            )
+            commune_elec = elec_raw[elec_raw['full_code'].str.startswith(target_code_elec)].copy()
+        
+            agg = commune_elec.groupby(['full_code', 'pol_group'])['voix'].sum().reset_index()
+            total_votes = agg.groupby('full_code')['voix'].transform('sum')
             agg['pct'] = (agg['voix'] / total_votes) * 100
-
+        
             elec_ex_r = agg[agg['pol_group'] == 1].copy()
-            elec_ex_r['code'] = elec_ex_r['code_commune_clean'].str.zfill(5)
-
+            elec_ex_r['code'] = elec_ex_r['full_code'].str.zfill(5)
+        
             final_elec_df = elec_ex_r.merge(map_bg_elec[['code', 'nom']], on='code', how='inner')
+        
+        final_elec_df = final_elec_df.dropna(subset=['pct'])
 
         # Map and table
         col_map_elec, col_stats_elec = st.columns([3, 1])
