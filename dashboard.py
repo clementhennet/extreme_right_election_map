@@ -1,4 +1,5 @@
 import os
+import streamlit as st
 if "KAGGLE_API_TOKEN" in st.secrets:
     os.environ["KAGGLE_API_TOKEN"] = st.secrets["KAGGLE_API_TOKEN"]
 
